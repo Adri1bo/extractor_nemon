@@ -7,7 +7,6 @@ from datetime import date
 
 import requests
 import streamlit as st
-from openpyxl import load_workbook
 
 # ============================================================
 # CONFIGURACIÓ DE L'API (Seguretat integrada amb Streamlit Cloud)
@@ -25,35 +24,28 @@ CABECERAS = (
        "Provincia", "Distribuidora", "Tipo Tarifa"]
 )
 
-
-def leer_cups_streamlit(uploaded_file):
-    try:
-        wb = load_workbook(uploaded_file, data_only=True)
-        ws = wb.active
-    except Exception as e:
-        st.error(f"Error al llegir l'arxiu Excel: {e}")
-        return None
-
+def procesar_texto_cups(texto_raw):
+    """Neteja el text d'entrada i en treu una llista de CUPS únics i vàlids."""
+    if not texto_raw:
+        return []
+    
+    # Substituïm salts de línia i espais per comes per normalitzar el text
+    texto_normalizado = texto_raw.replace("\n", ",").replace(" ", ",")
+    # Separem per comes
+    tokens = texto_normalizado.split(",")
+    
     registros = []
-    for fila in ws.iter_rows(min_row=1, values_only=True):
-        cups = fila[0] if len(fila) > 0 else None
-        num  = fila[1] if len(fila) > 1 else None
-
-        if cups is None or num is None:
-            continue
-        cups = str(cups).strip()
-        if not cups:
-            continue
-
-        try:
-            num_int = int(num)
-        except (ValueError, TypeError):
-            continue
-
-        registros.append((cups, f"{num_int:03d}"))
-
+    contador = 1
+    
+    for token in tokens:
+        cups = token.strip().upper()  # Forcem majúscules per als CUPS
+        if cups and len(cups) >= 15:  # Validació bàsica de longitud d'un CUPS
+            # Generem el número formatejat (001, 002...) de manera seqüencial
+            num_formateado = f"{contador:03d}"
+            registros.append((cups, num_formateado))
+            contador += 1
+            
     return registros
-
 
 def llamar_api(cups, fecha_inicio, fecha_fin, tipo, token_actual):
     data_json = json.dumps({
@@ -81,7 +73,6 @@ def llamar_api(cups, fecha_inicio, fecha_fin, tipo, token_actual):
             error_msg += f" | Resposta API: {r.text[:150]}"
         return None, error_msg
 
-
 def formatear_numero(valor):
     if valor is None or valor == "":
         return ""
@@ -105,7 +96,6 @@ def formatear_numero(valor):
 
     s = f"{f:.6f}".rstrip("0").rstrip(".")
     return s.replace(".", ",")
-
 
 def generar_csv_string(registros):
     output = io.StringIO()
@@ -146,29 +136,32 @@ def generar_csv_string(registros):
     csv_bytes = "\ufeff".encode("utf-16-le") + csv_text.encode("utf-16-le")
     return csv_bytes
 
-
-# Interfície
+# Interfície de Streamlit
 st.set_page_config(page_title="Descàrrega Consums CUPS", page_icon="⚡", layout="centered")
 
 st.title("⚡ Descàrrega de Consum Horari (CUPS)")
-st.write("Puja el teu Excel, configura els paràmetres i descarrega els consums des de la API al núvol.")
+st.write("Introdueix els CUPS a mà, configura els paràmetres i descarrega els consums en format CSV.")
 
 # Barra lateral d'autenticació
 with st.sidebar:
     st.header("🔑 Autenticació")
-    # Si s'ha configurat el secret al núvol s'usa per defecte, si no es demana en pantalla
     token_input = st.text_input(
         "API Token", 
         value=TOKEN_SECRET, 
         type="password",
-        help="Si has configurat els Secrets a Streamlit Cloud, aquest camp es pot deixar tal com està."
+        help="Si has configurat els Secrets a Streamlit Cloud, aquest camp es pot deixar buit."
     )
     st.info(f"API URL:\n`{URL_API}`")
 
-# Secció Central
+# Secció Central de Paràmetres
 st.header("📋 Paràmetres de la Consulta")
 
-uploaded_file = st.file_uploader("1. Selecciona el fitxer Excel (cups.xlsx)", type=["xlsx"])
+# Camp d'entrada nou: text area per enganxar CUPS
+cups_raw = st.text_area(
+    "1. Introdueix els CUPS (separats per comes, espais o salts de línia)",
+    placeholder="ES0021000000000000XXXXXX, ES0021000000000000YYYYYY",
+    height=150
+)
 
 col1, col2, col3 = st.columns(3)
 with col1:
@@ -176,21 +169,22 @@ with col1:
 with col2:
     fecha_fin = st.date_input("3. Data final", date.today())
 with col3:
-    tipo_consulta = st.text_input("4. Tipus de consulta", value="2")
+    tipo_consulta = st.text_input("4. Tipus de consulta (Telemedida)", value="1")
 
 if fecha_inicio > fecha_fin:
     st.error("Error: La data d'inici no pot ser posterior a la data final.")
 
-# Execució
-if st.button("🚀 Processar i descarregar dades", disabled=not uploaded_file or not token_input):
+# Execució del procés
+if st.button("🚀 Processar i descarregar dades", disabled=not cups_raw or not token_input):
     
-    registros_excel = leer_cups_streamlit(uploaded_file)
+    # Processar la llista des del text area
+    registros_cups = procesar_texto_cups(cups_raw)
     
-    if not registros_excel:
-        st.warning("No s'han trobat files vàlides a l'arxiu Excel o està buit.")
+    if not registros_cups:
+        st.warning("No s'ha detectat cap CUPS vàlid al camp de text (mínim 15 caràcters).")
     else:
-        total_cups = len(registros_excel)
-        st.info(f"S'han trobat **{total_cups}** CUPS al fitxer.")
+        total_cups = len(registros_cups)
+        st.info(f"S'han detectat **{total_cups}** CUPS preparats per a la consulta.")
         
         zip_buffer = io.BytesIO()
         exitos = 0
@@ -200,7 +194,7 @@ if st.button("🚀 Processar i descarregar dades", disabled=not uploaded_file or
         status_text = st.empty()
         
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-            for idx, (cups, num) in enumerate(registros_excel, start=1):
+            for idx, (cups, num) in enumerate(registros_cups, start=1):
                 porcentaje = idx / total_cups
                 progress_bar.progress(porcentaje)
                 status_text.text(f"Processant [{idx}/{total_cups}]: {cups}...")
@@ -215,12 +209,13 @@ if st.button("🚀 Processar i descarregar dades", disabled=not uploaded_file or
                     fallos += 1
                     continue
                 
-                lista = respuesta.get("listRequests") or [] if respuesta else []
+                lista = respuesta.get("listRequests") or if respuesta else
                 if not lista:
                     st.warning(f"⚠️ Sense dades a la API per a {cups}")
                     fallos += 1
                     continue
                 
+                # Nom del fitxer utilitzant el seqüencial generat automàticament
                 nombre_csv = f"03{num} {cups}.csv"
                 csv_data_bytes = generar_csv_string(lista)
                 zip_file.writestr(nombre_csv, csv_data_bytes)
@@ -236,11 +231,12 @@ if st.button("🚀 Processar i descarregar dades", disabled=not uploaded_file or
             st.download_button(
                 label="📥 Descarregar tots els CSVs (.ZIP)",
                 data=zip_buffer,
-                file_name=f"consums_{fecha_inicio}_al_{fecha_fin}.zip",
+                file_name=f"telemedida_{fecha_inicio}_al_{fecha_fin}.zip",
                 mime="application/zip"
             )
         else:
-            st.error("No s'ha pogut generar cap arxiu zip perquè totes les consultes han fallat.")
+            st.error("Totes les consultes a l'API han fallat o no tenien registres.")
 
-elif not uploaded_file:
-    st.info("💡 Sigueu tan amables de pujar el vostre fitxer Excel per començar.")
+elif not cups_raw:
+    st.info("💡 Escriu o enganxa un o més CUPS al quadre de text superior per començar.")
+
