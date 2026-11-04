@@ -11,7 +11,7 @@ import streamlit as st
 # ============================================================
 # CONFIGURACIÓ DE L'API (Seguretat integrada amb Streamlit Cloud)
 # ============================================================
-URL_API = "https://nemon2ib.com"
+URL_API = "https://reusenergia-tradeenergy.nemon2ib.com/api"
 
 # Intentem carregar el token des dels Secrets del núvol, si no, quedarà buit
 TOKEN_SECRET = st.secrets.get("api", {}).get("token", "")
