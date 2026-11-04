@@ -63,8 +63,17 @@ def llamar_api(cups, fecha_inicio, fecha_fin, tipo, token_actual):
         "data":   (None, data_json),
     }
 
+    # REPARAT: Capçaleres per saltar-se el bloqueig 403 de l'Azure Application Gateway
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive"
+    }
+
     try:
-        r = requests.post(URL_API, files=files, timeout=60)
+        # Afegim el paràmetre headers=headers a la petició POST
+        r = requests.post(URL_API, files=files, headers=headers, timeout=60)
         r.raise_for_status()
         return r.json(), None
     except Exception as e:
