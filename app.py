@@ -209,7 +209,7 @@ if st.button("🚀 Processar i descarregar dades", disabled=not cups_raw or not 
                     fallos += 1
                     continue
                 
-                lista = respuesta.get("listRequests") or if respuesta else
+                lista = respuesta.get("listRequests") if respuesta else
                 if not lista:
                     st.warning(f"⚠️ Sense dades a la API per a {cups}")
                     fallos += 1
